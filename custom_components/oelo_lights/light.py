@@ -16,25 +16,27 @@ from homeassistant.components.light import (
     ATTR_BRIGHTNESS, ATTR_RGB_COLOR, ColorMode, PLATFORM_SCHEMA, LightEntity, LightEntityFeature
 )
 
-from homeassistant.const import CONF_IP_ADDRESS, CONF_NAME
+from homeassistant.const import CONF_IP_ADDRESS
+from homeassistant.config_entries import ConfigEntry
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
 # Define the platform schema to allow configuration from YAML
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_IP_ADDRESS): vol.Coerce(str),
-    vol.Required(CONF_NAME): vol.Coerce(str),
 })
 
-async def async_setup_platform(
-    hass: HomeAssistant, config: dict, async_add_entities: AddEntitiesCallback, discovery_info=None
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback, discovery_info=None, 
 ):
     """Set up the Oelo Lights platform."""
-    ip_address = config.get(CONF_IP_ADDRESS)
-    zone_name = config.get(CONF_NAME)
+    ip_address = entry.data[CONF_IP_ADDRESS]
+
     session = aiohttp.ClientSession()
 
     # Create a list of light entities
@@ -77,6 +79,11 @@ class OeloLight(LightEntity, RestoreEntity):
     def name(self) -> str:
         """Return the name of the entity."""
         return self._name
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID for this light."""
+        return f"oelo_zone_{self._zone}"
 
     @property
     def is_on(self) -> bool:
