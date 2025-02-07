@@ -3,7 +3,7 @@
   "name": "Oelo Lights",
   "codeowners": [],
   "dependencies": [],
-  "documentation": "https://www.example.com",
+  "documentation": "https://web.api.cindev.com/oelo/docs/integration.pdf",
   "integration_type": "hub",
   "iot_class": "local_push",
   "requirements": "",
