@@ -26,7 +26,6 @@ from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
-# Define the platform schema to allow configuration from YAML
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_IP_ADDRESS): vol.Coerce(str),
 })
@@ -39,18 +38,15 @@ async def async_setup_entry(
 
     session = aiohttp.ClientSession()
 
-    # Create a list of light entities
     light_entities = []
 
-    # Create a light entity for each of the 6 zones
+    # Create a light entity for each of the 6 zones on the controller
     for zone in range(1, 7):
         light_entity = OeloLight(session, ip_address, zone)
         light_entities.append(light_entity)
 
-    # Add all light entities
     async_add_entities(light_entities)
 
-    # Ensure the session is closed on shutdown
     def close_session(event):
         session.close()
 
@@ -65,11 +61,11 @@ class OeloLight(LightEntity, RestoreEntity):
         self._ip = ip
         self._zone = zone
         self._state = False
-        self._brightness = 255  # Max brightness
-        self._rgb_color = (255, 255, 255)  # Default to white
+        self._brightness = 255
+        self._rgb_color = (255, 255, 255) 
         self._name = f"Oelo Zone: {zone}"
         self._effect = None
-        self._last_successful_command = None  # Initialize to None
+        self._last_successful_command = None
 
         self._attr_supported_color_modes = {ColorMode.RGB}
         self._attr_color_mode = ColorMode.RGB
@@ -118,7 +114,7 @@ class OeloLight(LightEntity, RestoreEntity):
     async def async_added_to_hass(self):
         """Handle entity which is added to Home Assistant."""
         await super().async_added_to_hass()
-        # Restore state if there is a saved state
+
         state = await self.async_get_last_state()
         if state:
             self._state = state.state == "on"
@@ -134,17 +130,14 @@ class OeloLight(LightEntity, RestoreEntity):
         """Turn on the light with optional RGB color, brightness, and effect."""
         self._state = True
 
-        # Ensure brightness is always valid.
         self._brightness = kwargs.get(ATTR_BRIGHTNESS, self._brightness if self._brightness is not None else 255)
 
-        url = None  # Initialize url to None to ensure it is always defined.
+        url = None
 
         if ATTR_RGB_COLOR in kwargs:
-            # RGB mode takes precedence
-            self._effect = None  # Clear the effect if RGB is set
+            self._effect = None
             self._rgb_color = kwargs[ATTR_RGB_COLOR]
 
-            # Construct URL for RGB color setting
             brightness_factor = self._brightness / 255
             scaled_color = tuple(int(c * brightness_factor) for c in self._rgb_color)
             url = (
@@ -154,7 +147,6 @@ class OeloLight(LightEntity, RestoreEntity):
             )
         
         elif "effect" in kwargs:
-            # Effect takes precedence if specified
             self._effect = kwargs["effect"]
             self._rgb_color = (255, 255, 255)
 
@@ -169,7 +161,7 @@ class OeloLight(LightEntity, RestoreEntity):
             brightness_factor = self._brightness / 255
             new_url = self._adjust_colors_in_url(url, brightness_factor)
             await self._send_request(new_url)
-            self._last_successful_command = url  # Save the last successful command
+            self._last_successful_command = url
         else:
             if self._last_successful_command:
                 _LOGGER.warning("Retrying last successful command for zone %d", self._zone)
@@ -217,44 +209,30 @@ class OeloLight(LightEntity, RestoreEntity):
         asyncio.run_coroutine_threadsafe(self.async_turn_off(**kwargs), self.hass.loop)
 
     def _adjust_colors_in_url(self, url: str, brightness_factor: float) -> str:
-        # Parse the URL to extract query parameters
         parsed_url = urllib.parse.urlparse(url)
         query_params = urllib.parse.parse_qs(parsed_url.query)
 
-        # _LOGGER.info("Original URL: %s", url)
-
-        # Extract the 'colors' parameter if it exists
         if 'colors' in query_params:
             colors_str = query_params['colors'][0]
-            if colors_str:  # Ensure colors_str is not empty
-                # Split the colors string by commas to get individual RGB values
-                colors = [c for c in colors_str.split(',') if c]  # Filter out empty values
-
-                # _LOGGER.info("Original color values: %s", colors)  # Log original colors
+            if colors_str: 
+                colors = [c for c in colors_str.split(',') if c]
 
                 try:
-                    # Convert color values to integers
                     colors = list(map(int, colors))
                 except ValueError:
                     _LOGGER.error("Invalid color value found in the colors parameter: %s", colors_str)
-                    colors = [0, 0, 0]  # Default to black if there's an error
+                    colors = [0, 0, 0]
 
-                # Multiply each color value by the brightness factor
                 adjusted_colors = [max(0, min(int(value * brightness_factor), 255)) for value in colors]
-
-                # _LOGGER.info("Adjusted color values: %s", adjusted_colors)  # Log adjusted colors
                 
-                # Reconstruct the colors string
                 adjusted_colors_str = ','.join(map(str, adjusted_colors))
                 query_params['colors'] = [adjusted_colors_str]
             else:
                 _LOGGER.error("Colors parameter is empty.")
-                query_params['colors'] = ['0,0,0']  # Default to black if empty
+                query_params['colors'] = ['0,0,0']
 
-        # Reconstruct the query string with the modified 'colors'
         new_query = urllib.parse.urlencode(query_params, doseq=True)
         
-        # Rebuild the URL with the modified query string
         new_url = urllib.parse.urlunparse(
             (parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.params, new_query, parsed_url.fragment)
         )

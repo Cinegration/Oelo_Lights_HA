@@ -4,7 +4,6 @@ from homeassistant.config_entries import ConfigEntry
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the Oelo Lights integration from a config entry."""
-    # Use the new async_forward_entry_setups (note the plural) and await it.
     await hass.config_entries.async_forward_entry_setups(entry, ["light"])
     return True
 
