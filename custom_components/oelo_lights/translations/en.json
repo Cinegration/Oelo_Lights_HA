@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Oelo Lights Controller",
+        "description": "Enter the local IP address of your Oelo controller.",
+        "data": {
+          "ip_address": "IP Address"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Oelo Lights Controller",
+        "description": "Update the local IP address for your Oelo controller.",
+        "data": {
+          "ip_address": "IP Address"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the controller at the specified IP address. Please check the IP and ensure the device is online and responding.",
+      "invalid_ip": "The provided IP address format is invalid.",
+      "reconfigure_failed_duplicate_ip": "This IP address ({ip_address}) is already configured for another Oelo controller.",
+      "unknown": "An unexpected error occurred. Please check the logs."
+    },
+    "abort": {
+      "already_configured": "This Oelo controller (based on IP address) is already configured.",
+      "reconfigure_successful": "Reconfiguration successful."
+    }
+  }
+}
