@@ -1,3 +1,5 @@
+"""Config flow for Oelo Lights."""
+
 from __future__ import annotations
 import logging
 from typing import Any
@@ -6,7 +8,7 @@ import ipaddress
 import asyncio  
 import aiohttp  
 
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_IP_ADDRESS
 from homeassistant.helpers.aiohttp_client import async_get_clientsession 
 
@@ -48,7 +50,7 @@ async def validate_input(hass, data):
         async with session.get(controller_url, timeout=10) as response:
             if response.status == 200:
                 _LOGGER.debug("Successfully connected to Oelo controller at %s", ip)
-                return {"title": f"Oelo Lights"} 
+                return {"title": "Oelo Lights"} 
             else:
                 _LOGGER.warning(
                     "Failed to connect to Oelo controller at %s - HTTP Status: %s",

@@ -1,15 +1,24 @@
-from __future__ import annotations
+"""Light platform for the Oelo Lights integration."""
 
+from __future__ import annotations
 import logging
 import asyncio
-import json
-from json import JSONDecodeError
-import voluptuous as vol
 import aiohttp
 import async_timeout
-import re
 import urllib.parse
 from typing import Any
+from homeassistant.const import CONF_IP_ADDRESS, STATE_ON
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers import aiohttp_client
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.components.light import (
+    ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGB_COLOR, ColorMode, LightEntity, LightEntityFeature
+)
+from datetime import timedelta
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,21 +38,6 @@ except ImportError:
         _LOGGER.warning("Could not import const.py, using default DOMAIN 'oelo_lights'.")
 
 
-from homeassistant.components.light import (
-    ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGB_COLOR, ColorMode, PLATFORM_SCHEMA, LightEntity, LightEntityFeature
-)
-
-from homeassistant.const import CONF_IP_ADDRESS, STATE_ON, STATE_OFF
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers import aiohttp_client
-from homeassistant.exceptions import NoEntitySpecifiedError
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
-from datetime import timedelta
 SCAN_INTERVAL = timedelta(seconds=30)
 
 # --- DataUpdateCoordinator for shared polling ---
@@ -276,8 +270,10 @@ class OeloLight(LightEntity, RestoreEntity):
                 base_command_for_lsc = self._get_base_effect_url(selected_effect)
                 if base_command_for_lsc:
                     extracted_rgb = self._extract_first_color_from_url(base_command_for_lsc)
-                    if extracted_rgb: rgb_to_set = extracted_rgb
-                    else: _LOGGER.warning("%s: No base RGB for effect '%s', color may be default.", log_prefix, selected_effect)
+                    if extracted_rgb: 
+                        rgb_to_set = extracted_rgb
+                    else: 
+                        _LOGGER.warning("%s: No base RGB for effect '%s', color may be default.", log_prefix, selected_effect)
                     url_to_send = self._adjust_colors_in_url(base_command_for_lsc, brightness_factor)
                 else:
                     _LOGGER.error("%s: Could not get base URL for effect '%s'", log_prefix, selected_effect)
@@ -294,7 +290,8 @@ class OeloLight(LightEntity, RestoreEntity):
                 base_command_for_lsc = self._get_base_effect_url(effect_to_set)
                 if base_command_for_lsc:
                     extracted_rgb = self._extract_first_color_from_url(base_command_for_lsc)
-                    if extracted_rgb: rgb_to_set = extracted_rgb
+                    if extracted_rgb: 
+                        rgb_to_set = extracted_rgb
                 else:
                     effect_to_set = None
             
@@ -306,9 +303,11 @@ class OeloLight(LightEntity, RestoreEntity):
                  lsc_pattern_type = lsc_params.get("patternType", [""])[0]
                  
                  extracted_rgb_lsc = self._extract_first_color_from_url(base_command_for_lsc)
-                 if extracted_rgb_lsc: rgb_to_set = extracted_rgb_lsc
+                 if extracted_rgb_lsc: 
+                     rgb_to_set = extracted_rgb_lsc
 
-                 if lsc_pattern_type == "custom": effect_to_set = None
+                 if lsc_pattern_type == "custom": 
+                     effect_to_set = None
                  elif lsc_pattern_type != "off":
                      found_effect_name = False
                      for name, cmd_url_template in pattern_commands.items():
@@ -319,8 +318,10 @@ class OeloLight(LightEntity, RestoreEntity):
                                  effect_to_set = name
                                  found_effect_name = True
                                  break
-                         except Exception: pass
-                     if not found_effect_name: effect_to_set = None
+                         except Exception: 
+                             pass
+                     if not found_effect_name: 
+                         effect_to_set = None
 
             if base_command_for_lsc:
                 url_to_send = self._adjust_colors_in_url(base_command_for_lsc, brightness_factor)
@@ -362,25 +363,29 @@ class OeloLight(LightEntity, RestoreEntity):
                     if not self._attr_available:
                         _LOGGER.info("%s: Marking available after successful turn_on.", log_prefix)
                         self._attr_available = True
-                        if self.hass is not None and self.entity_id is not None: self.async_write_ha_state()
+                        if self.hass is not None and self.entity_id is not None: 
+                            self.async_write_ha_state()
                 else:
                     _LOGGER.error("%s: Turn_on command failed via buffer.", log_prefix)
                     if self._attr_available:
                         _LOGGER.warning("%s: Marking unavailable after failed turn_on.", log_prefix)
                         self._attr_available = False
-                        if self.hass is not None and self.entity_id is not None: self.async_write_ha_state()
+                        if self.hass is not None and self.entity_id is not None: 
+                            self.async_write_ha_state()
             except asyncio.CancelledError:
                 _LOGGER.debug("%s: Turn_on command superseded. Optimistic state remains.", log_prefix)
             except Exception as e:
                 _LOGGER.error("%s: Error during _buffered_send_request for turn_on: %s", log_prefix, e, exc_info=True)
                 if self._attr_available:
                     self._attr_available = False
-                    if self.hass is not None and self.entity_id is not None: self.async_write_ha_state()
+                    if self.hass is not None and self.entity_id is not None: 
+                        self.async_write_ha_state()
         else:
              _LOGGER.debug("%s: Turn on called, no URL generated.", log_prefix)
              if not self._attr_available:
                  self._attr_available = True
-                 if self.hass is not None and self.entity_id is not None: self.async_write_ha_state()
+                 if self.hass is not None and self.entity_id is not None: 
+                     self.async_write_ha_state()
 
 
     async def async_turn_off(self, **kwargs: Any) -> None:
@@ -416,20 +421,23 @@ class OeloLight(LightEntity, RestoreEntity):
                 if not self._attr_available:
                     _LOGGER.info("%s: Marking available after successful turn_off.", log_prefix)
                     self._attr_available = True
-                    if self.hass is not None and self.entity_id is not None: self.async_write_ha_state()
+                    if self.hass is not None and self.entity_id is not None: 
+                        self.async_write_ha_state()
             else:
                 _LOGGER.error("%s: Turn_off command failed via buffer.", log_prefix)
                 if self._attr_available:
                     _LOGGER.warning("%s: Marking unavailable after failed turn_off.", log_prefix)
                     self._attr_available = False
-                    if self.hass is not None and self.entity_id is not None: self.async_write_ha_state()
+                    if self.hass is not None and self.entity_id is not None: 
+                        self.async_write_ha_state()
         except asyncio.CancelledError:
             _LOGGER.debug("%s: Turn_off command superseded. Optimistic state remains.", log_prefix)
         except Exception as e:
             _LOGGER.error("%s: Error during _buffered_send_request for turn_off: %s", log_prefix, e, exc_info=True)
             if self._attr_available:
                 self._attr_available = False
-                if self.hass is not None and self.entity_id is not None: self.async_write_ha_state()
+                if self.hass is not None and self.entity_id is not None: 
+                    self.async_write_ha_state()
 
 
     def _get_base_effect_url(self, effect_name: str) -> str | None:
@@ -468,7 +476,8 @@ class OeloLight(LightEntity, RestoreEntity):
 
     def _extract_first_color_from_url(self, url: str) -> tuple[int, int, int] | None:
         log_prefix = self.entity_id or self._attr_name
-        if not url: return None
+        if not url: 
+            return None
         try:
             query_params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
             if 'colors' in query_params and query_params['colors'][0]:
