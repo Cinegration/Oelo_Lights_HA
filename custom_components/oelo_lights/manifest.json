@@ -7,7 +7,7 @@
   "issue_tracker": "https://github.com/Cinegration/Oelo_Lights_HA/issues",
   "integration_type": "hub",
   "iot_class": "local_push",
-  "requirements": "",
+  "requirements": [],
   "config_flow": true,
   "version": "1.0.0"
 }
