@@ -39,7 +39,7 @@ except ImportError:
         _LOGGER.warning("Could not import const.py, using default DOMAIN 'oelo_lights'.")
 
 SCAN_INTERVAL = timedelta(seconds=30)
-STORAGE_KEY_BASE = f"{DOMAIN}_entity_data" # Base key, will be appended with entry_id
+STORAGE_KEY_BASE = f"{DOMAIN}_entity_data"
 STORAGE_VERSION = 1
 
 class OeloDataUpdateCoordinator(DataUpdateCoordinator):
@@ -385,7 +385,7 @@ class OeloLight(LightEntity, RestoreEntity):
             if self._last_successful_command != base_command_for_lsc:
                 self._last_successful_command = base_command_for_lsc
                 await self._save_last_command_to_store()
-        elif self._last_successful_command is not None: # Clear LSC if no base command was determined for this ON operation
+        elif self._last_successful_command is not None: 
             self._last_successful_command = None
             await self._save_last_command_to_store()
 
