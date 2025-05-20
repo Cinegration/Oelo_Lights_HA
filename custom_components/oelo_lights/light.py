@@ -15,6 +15,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.storage import Store
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGB_COLOR, ColorMode, LightEntity, LightEntityFeature
 )
@@ -37,10 +38,10 @@ except ImportError:
         DOMAIN = "oelo_lights"
         _LOGGER.warning("Could not import const.py, using default DOMAIN 'oelo_lights'.")
 
-
 SCAN_INTERVAL = timedelta(seconds=30)
+STORAGE_KEY_BASE = f"{DOMAIN}_entity_data" # Base key, will be appended with entry_id
+STORAGE_VERSION = 1
 
-# --- DataUpdateCoordinator for shared polling ---
 class OeloDataUpdateCoordinator(DataUpdateCoordinator):
     def __init__(self, hass, session, ip):
         super().__init__(
@@ -73,22 +74,34 @@ async def async_setup_entry(
 
     coordinator = OeloDataUpdateCoordinator(hass, session, ip_address)
     await coordinator.async_config_entry_first_refresh()
+
     if DOMAIN not in hass.data:
         hass.data[DOMAIN] = {}
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    storage_key_for_entry = f"{STORAGE_KEY_BASE}_{entry.entry_id}"
+    store = Store(hass, STORAGE_VERSION, storage_key_for_entry)
+    stored_entity_data = await store.async_load() or {}
+
+    hass.data[DOMAIN][entry.entry_id] = {
+        "coordinator": coordinator,
+        "store": store,
+        "stored_entity_data": stored_entity_data,
+    }
 
     light_entities = []
     for zone in range(1, 7):
-        light_entity = OeloLight(coordinator, zone, entry)
+        entity_store_key = f"zone_{zone}_last_command"
+        restored_last_command = stored_entity_data.get(entity_store_key)
+        light_entity = OeloLight(coordinator, zone, entry, restored_last_command)
         light_entities.append(light_entity)
     async_add_entities(light_entities, True)
 
-# --- OeloLight using DataUpdateCoordinator ---
 class OeloLight(LightEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, coordinator: OeloDataUpdateCoordinator, zone: int, entry: ConfigEntry) -> None:
+    def __init__(self, coordinator: OeloDataUpdateCoordinator, zone: int, entry: ConfigEntry,
+                 restored_last_command: str | None = None) -> None:
         self.coordinator = coordinator
         self._zone = zone
         self._entry = entry
@@ -96,7 +109,7 @@ class OeloLight(LightEntity, RestoreEntity):
         self._brightness: int | None = 255
         self._rgb_color: tuple[int, int, int] | None = (255, 255, 255)
         self._intended_effect: str | None = None
-        self._last_successful_command: str | None = None
+        self._last_successful_command: str | None = restored_last_command
         self._attr_supported_color_modes = {ColorMode.RGB}
         self._attr_color_mode = ColorMode.RGB
         self._attr_supported_features = LightEntityFeature.EFFECT
@@ -107,6 +120,8 @@ class OeloLight(LightEntity, RestoreEntity):
         self._pending_command_future: asyncio.Future | None = None
         self._debounce_task: asyncio.Task | None = None
         self._debounce_interval = 1.0
+        self._entity_store_key = f"zone_{self._zone}_last_command"
+
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -163,20 +178,19 @@ class OeloLight(LightEntity, RestoreEntity):
             else:
                 _LOGGER.debug("%s: No valid RGB in restored state, using default or will derive.", log_prefix)
                 self._rgb_color = (255,255,255)
-            _LOGGER.debug("%s: Restored state: On=%s, Brightness=%s, Effect=%s, RGB=%s",
-                        log_prefix, self._state, self._brightness, self._intended_effect, self._rgb_color)
+
+            _LOGGER.debug("%s: Restored standard attrs: On=%s, Brightness=%s, Effect=%s, RGB=%s. LSC from Store: %s",
+                        log_prefix, self._state, self._brightness, self._intended_effect, self._rgb_color, self._last_successful_command)
         else:
             _LOGGER.debug("%s: No previous state found for restore.", log_prefix)
+            if self._rgb_color is None:
+                self._rgb_color = (255, 255, 255)
 
     async def async_update(self) -> None:
-        # Request a refresh from the coordinator (if needed)
         await self.coordinator.async_request_refresh()
-        # The coordinator will call _handle_coordinator_update
 
     def _handle_coordinator_update(self) -> None:
-        # Called when the coordinator updates data
         log_prefix = self.entity_id or self._attr_name
-        # If the coordinator failed to update, mark unavailable
         if not self.coordinator.last_update_success:
             if self._attr_available:
                 _LOGGER.warning("%s: Coordinator update failed, marking unavailable.", log_prefix)
@@ -217,6 +231,26 @@ class OeloLight(LightEntity, RestoreEntity):
             if not new_state:
                 self._intended_effect = None
         self.async_write_ha_state()
+
+    async def _save_last_command_to_store(self):
+        log_prefix = self.entity_id or self._attr_name
+        if self.hass and self._entry.entry_id in self.hass.data.get(DOMAIN, {}):
+            entry_hass_data = self.hass.data[DOMAIN][self._entry.entry_id]
+            store: Store = entry_hass_data.get("store")
+            stored_entity_data: dict = entry_hass_data.get("stored_entity_data")
+
+            if store and stored_entity_data is not None:
+                if self._last_successful_command is None:
+                    if self._entity_store_key in stored_entity_data:
+                        del stored_entity_data[self._entity_store_key]
+                        _LOGGER.debug("%s: Removed LSC from store for key %s", log_prefix, self._entity_store_key)
+                else:
+                    stored_entity_data[self._entity_store_key] = self._last_successful_command
+                    _LOGGER.debug("%s: Updated LSC '%s' in store data for key %s",
+                                  log_prefix, self._last_successful_command, self._entity_store_key)
+                await store.async_save(stored_entity_data)
+            else:
+                _LOGGER.warning("%s: Store or stored_entity_data not found for saving LSC.", log_prefix)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         log_prefix = self.entity_id or self._attr_name
@@ -346,8 +380,15 @@ class OeloLight(LightEntity, RestoreEntity):
         self._rgb_color = rgb_to_set
         self._intended_effect = effect_to_set
         self._attr_color_mode = ColorMode.RGB
+
         if base_command_for_lsc:
-            self._last_successful_command = base_command_for_lsc
+            if self._last_successful_command != base_command_for_lsc:
+                self._last_successful_command = base_command_for_lsc
+                await self._save_last_command_to_store()
+        elif self._last_successful_command is not None: # Clear LSC if no base command was determined for this ON operation
+            self._last_successful_command = None
+            await self._save_last_command_to_store()
+
 
         _LOGGER.debug("%s: Optimistic: On=%s, Bright=%s, Effect=%s, RGB=%s, LSC=%s",
                       log_prefix, self._state, self._brightness, self._intended_effect, self._rgb_color, self._last_successful_command)
@@ -640,3 +681,13 @@ class OeloLight(LightEntity, RestoreEntity):
             _LOGGER.error("%s: Error in _debounce_and_send: %s", log_prefix, e, exc_info=True)
             if self._pending_command_future and not self._pending_command_future.done():
                 self._pending_command_future.set_result(False)
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Handle unloading of a config entry."""
+    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
+        del hass.data[DOMAIN][entry.entry_id]
+        if not hass.data[DOMAIN]:
+            del hass.data[DOMAIN]
+        _LOGGER.info("Unloaded Oelo Lights entry %s", entry.entry_id)
+
+    return await hass.config_entries.async_unload_platforms(entry, ["light"])
