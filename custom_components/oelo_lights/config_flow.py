@@ -11,6 +11,7 @@ import aiohttp
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_IP_ADDRESS
 from homeassistant.helpers.aiohttp_client import async_get_clientsession 
+from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 
@@ -20,16 +21,12 @@ class CannotConnect(Exception):
     """Exception raised when a connection to the device cannot be established."""
     pass
 
-class InvalidAuth(Exception):
-    """Exception raised when authentication fails."""
-    pass
-
 class InvalidIP(Exception):
     """Exception raised for invalid IP format."""
     pass
 
 
-async def validate_input(hass, data):
+async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, str]:
     """Validate user input allows us to connect."""
 
     ip = data.get(CONF_IP_ADDRESS)
@@ -47,10 +44,21 @@ async def validate_input(hass, data):
 
     try:
         _LOGGER.debug("Attempting to connect to Oelo controller at %s", controller_url)
-        async with session.get(controller_url, timeout=10) as response:
+        timeout = aiohttp.ClientTimeout(total=10, connect=5)
+        async with session.get(controller_url, timeout=timeout) as response:
             if response.status == 200:
-                _LOGGER.debug("Successfully connected to Oelo controller at %s", ip)
-                return {"title": "Oelo Lights"} 
+                try:
+                    # Try to parse response as JSON to verify it's an Oelo controller
+                    data = await response.json(content_type=None)
+                    if isinstance(data, list):
+                        _LOGGER.debug("Successfully connected to Oelo controller at %s", ip)
+                        return {"title": "Oelo Lights"} 
+                    else:
+                        _LOGGER.warning("Unexpected response format from %s", ip)
+                        raise CannotConnect("Device responded but doesn't appear to be an Oelo controller")
+                except (aiohttp.ContentTypeError, ValueError) as err:
+                    _LOGGER.warning("Invalid JSON response from %s: %s", ip, err)
+                    raise CannotConnect("Device responded but doesn't appear to be an Oelo controller")
             else:
                 _LOGGER.warning(
                     "Failed to connect to Oelo controller at %s - HTTP Status: %s",
@@ -64,8 +72,8 @@ async def validate_input(hass, data):
             "Failed to connect to Oelo controller at %s: %s", ip, err
         )
         raise CannotConnect(f"Could not connect to the controller at {ip}. Check IP address and ensure device is online.")
-    except asyncio.TimeoutError:
-        _LOGGER.warning("Timeout connecting to Oelo controller at %s", ip)
+    except (asyncio.TimeoutError, aiohttp.ServerTimeoutError) as err:
+        _LOGGER.warning("Timeout connecting to Oelo controller at %s: %s", ip, err)
         raise CannotConnect(f"Connection to the controller at {ip} timed out.")
     except Exception as exc:
         _LOGGER.exception("Unexpected error validating Oelo controller at %s: %s", ip, exc)
@@ -117,6 +125,10 @@ class OeloLightsConfigFlow(ConfigFlow, domain=DOMAIN):
         """Allow reconfiguration of an existing config entry."""
         errors: dict[str, str] = {}
         config_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        
+        if config_entry is None:
+            _LOGGER.error("Config entry not found for reconfiguration")
+            return self.async_abort(reason="entry_not_found")
 
         if user_input is not None:
 
@@ -130,15 +142,17 @@ class OeloLightsConfigFlow(ConfigFlow, domain=DOMAIN):
                                    user_input.get(CONF_IP_ADDRESS))
             
                      if self._async_current_entries(): 
-                         existing_entry = await self.async_set_unique_id(user_input[CONF_IP_ADDRESS], raise_on_progress=False)
-                         if existing_entry and existing_entry.entry_id != config_entry.entry_id:
-                              errors["base"] = "reconfigure_failed_duplicate_ip"
-                              return self.async_show_form(
-                                  step_id="reconfigure",
-                                  data_schema=vol.Schema({vol.Required(CONF_IP_ADDRESS, default=user_input.get(CONF_IP_ADDRESS)): str}),
-                                  errors=errors,
-                                  description_placeholders={"ip_address": user_input.get(CONF_IP_ADDRESS)}
-                              )
+                         new_ip = user_input.get(CONF_IP_ADDRESS)
+                         if new_ip:
+                             existing_entry = await self.async_set_unique_id(new_ip, raise_on_progress=False)
+                             if existing_entry and existing_entry.entry_id != config_entry.entry_id:
+                                  errors["base"] = "reconfigure_failed_duplicate_ip"
+                                  return self.async_show_form(
+                                      step_id="reconfigure",
+                                      data_schema=vol.Schema({vol.Required(CONF_IP_ADDRESS, default=user_input.get(CONF_IP_ADDRESS)): str}),
+                                      errors=errors,
+                                      description_placeholders={"ip_address": user_input.get(CONF_IP_ADDRESS)}
+                                  )
 
                      return self.async_update_reload_and_abort(
                          config_entry,

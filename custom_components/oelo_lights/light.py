@@ -43,7 +43,7 @@ STORAGE_KEY_BASE = f"{DOMAIN}_entity_data"
 STORAGE_VERSION = 1
 
 class OeloDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, session, ip):
+    def __init__(self, hass: HomeAssistant, session: aiohttp.ClientSession, ip: str) -> None:
         super().__init__(
             hass,
             _LOGGER,
@@ -248,7 +248,10 @@ class OeloLight(LightEntity, RestoreEntity):
                     stored_entity_data[self._entity_store_key] = self._last_successful_command
                     _LOGGER.debug("%s: Updated LSC '%s' in store data for key %s",
                                   log_prefix, self._last_successful_command, self._entity_store_key)
-                await store.async_save(stored_entity_data)
+                try:
+                    await store.async_save(stored_entity_data)
+                except Exception as e:
+                    _LOGGER.error("%s: Failed to save last command to store: %s", log_prefix, e)
             else:
                 _LOGGER.warning("%s: Store or stored_entity_data not found for saving LSC.", log_prefix)
 
@@ -270,15 +273,28 @@ class OeloLight(LightEntity, RestoreEntity):
         base_command_for_lsc: str | None = None
 
         if ATTR_BRIGHTNESS in kwargs:
-            brightness_to_set = kwargs[ATTR_BRIGHTNESS]
-            _LOGGER.debug("%s: Brightness specified: %d", log_prefix, brightness_to_set)
+            try:
+                brightness_to_set = int(kwargs[ATTR_BRIGHTNESS])
+                _LOGGER.debug("%s: Brightness specified: %d", log_prefix, brightness_to_set)
+            except (ValueError, TypeError):
+                _LOGGER.warning("%s: Invalid brightness value: %s, using default", log_prefix, kwargs[ATTR_BRIGHTNESS])
+                brightness_to_set = 255
 
         brightness_to_set = max(0, min(brightness_to_set, 255))
         brightness_factor = brightness_to_set / 255.0
 
         if ATTR_RGB_COLOR in kwargs:
             _LOGGER.debug("%s: RGB color specified: %s", log_prefix, kwargs[ATTR_RGB_COLOR])
-            rgb_to_set = kwargs[ATTR_RGB_COLOR]
+            try:
+                rgb_input = kwargs[ATTR_RGB_COLOR]
+                if isinstance(rgb_input, (list, tuple)) and len(rgb_input) == 3:
+                    rgb_to_set = tuple(max(0, min(int(c), 255)) for c in rgb_input)
+                else:
+                    _LOGGER.warning("%s: Invalid RGB color format: %s, using current color", log_prefix, rgb_input)
+                    rgb_to_set = self._rgb_color or (255, 255, 255)
+            except (ValueError, TypeError):
+                _LOGGER.warning("%s: Invalid RGB color values: %s, using current color", log_prefix, kwargs[ATTR_RGB_COLOR])
+                rgb_to_set = self._rgb_color or (255, 255, 255)
             effect_to_set = None
             
             scaled_color = tuple(max(0, min(int(round(c * brightness_factor)), 255)) for c in rgb_to_set)
@@ -521,11 +537,15 @@ class OeloLight(LightEntity, RestoreEntity):
             return None
         try:
             query_params = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-            if 'colors' in query_params and query_params['colors'][0]:
+            if 'colors' in query_params and query_params['colors'] and query_params['colors'][0]:
                 colors_str = query_params['colors'][0]
-                color_values = [c.strip() for c in colors_str.split(',') if c.strip().isdigit()]
-                if len(color_values) >= 3:
-                    return tuple(max(0, min(int(v), 255)) for v in color_values[:3])
+                color_parts = colors_str.split(',')
+                if len(color_parts) >= 3:
+                    try:
+                        color_values = [max(0, min(int(c.strip()), 255)) for c in color_parts[:3]]
+                        return tuple(color_values)
+                    except (ValueError, TypeError):
+                        _LOGGER.debug("%s: Invalid color values in '%s' from %s", log_prefix, colors_str, url)
                 else:
                     _LOGGER.debug("%s: Not enough numeric values in colors='%s' from %s", log_prefix, colors_str, url)
             else:
@@ -542,11 +562,12 @@ class OeloLight(LightEntity, RestoreEntity):
         _LOGGER.debug("%s: Sending request: %s", log_prefix, url)
         try:
             async with async_timeout.timeout(10):
-                if self.coordinator.session is None or self.coordinator.session.closed:
+                session = self.coordinator.session
+                if session is None or session.closed:
                      _LOGGER.error("%s: HTTP session closed/invalid for send request.", log_prefix)
                      return False
 
-                async with self.coordinator.session.get(url) as response:
+                async with session.get(url) as response:
                     resp_text = await response.text()
                     response.raise_for_status()
 
@@ -681,6 +702,26 @@ class OeloLight(LightEntity, RestoreEntity):
             _LOGGER.error("%s: Error in _debounce_and_send: %s", log_prefix, e, exc_info=True)
             if self._pending_command_future and not self._pending_command_future.done():
                 self._pending_command_future.set_result(False)
+
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Clean up resources when entity is removed."""
+        try:
+            if self._debounce_task and not self._debounce_task.done():
+                self._debounce_task.cancel()
+                try:
+                    await self._debounce_task
+                except asyncio.CancelledError:
+                    pass
+            
+            if self._pending_command_future and not self._pending_command_future.done():
+                self._pending_command_future.cancel()
+            
+        except Exception as e:
+            _LOGGER.debug("%s: Error during cleanup: %s", self.entity_id or self._attr_name, e)
+        finally:
+            await super().async_will_remove_from_hass()
+            
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Handle unloading of a config entry."""
