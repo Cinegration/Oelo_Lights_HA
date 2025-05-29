@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_IP_ADDRESS
 from homeassistant.helpers.aiohttp_client import async_get_clientsession 
 from homeassistant.core import HomeAssistant
+from homeassistant import data_entry_flow
 
 from .const import DOMAIN
 
@@ -107,6 +108,8 @@ class OeloLightsConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_ip"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except data_entry_flow.AbortFlow:
+                raise
             except Exception: 
                 _LOGGER.exception("Unexpected exception during user step")
                 errors["base"] = "unknown"
