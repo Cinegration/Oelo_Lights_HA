@@ -23,7 +23,7 @@ This custom integration allows you to control your Oelo Lights system directly f
 
 ## Installation
 
-### HACS (Recommended)
+### HACS (Recommended) - HACS is currently not yet implemented. WIP.
 
 1. Go to **HACS > Integrations** in Home Assistant.
 2. Click the three dots (upper right) > **Custom repositories**.
